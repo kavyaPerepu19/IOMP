@@ -17,3 +17,45 @@ button:hover{ filter:brightness(1.15); }
 #globe-container{ height:70vh; min-height:520px; border-radius:16px; overflow:hidden; }
 .link{ color:var(--accent); text-decoration:none; }
 .link:hover{ text-decoration:underline; }
+
+/* Navbar */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  backdrop-filter: saturate(140%) blur(6px);
+  background: rgba(11,16,32,0.7);
+  border-bottom: 1px solid #1f2747;
+}
+.nav__inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.nav__brand {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+.nav__links {
+  display: flex;
+  gap: 12px;
+}
+.nav__link {
+  padding: 8px 12px;
+  border-radius: 10px;
+  text-decoration: none;
+  color: #cfe2ff;
+  border: 1px solid transparent;
+}
+.nav__link:hover {
+  border-color: #2a335b;
+  background: #12172a;
+}
+.nav__link.active {
+  color: white;
+  border-color: #33427a;
+  background: #19224a;
+}
