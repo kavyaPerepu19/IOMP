@@ -9,13 +9,17 @@ export default function Navbar() {
           <span>🛰 SatTracker</span>
         </div>
         <nav className="nav__links">
-          <NavLink to="/" end className="nav__link">
-            Home
-          </NavLink>
-          <NavLink to="/track" className="nav__link">
-            Track
-          </NavLink>
-        </nav>
+  <NavLink to="/" end className="nav__link">
+    Home
+  </NavLink>
+  <NavLink to="/track" className="nav__link">
+    Track
+  </NavLink>
+  <NavLink to="/predict" className="nav__link">
+    Predict
+  </NavLink>
+</nav>
+
       </div>
     </header>
   )

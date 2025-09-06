@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import Home from './pages/Home'
 import Stracker from './pages/Stracker'
+import CollisionPage from './pages/CollisionPage'
 
 export default function App() {
   return (
@@ -11,8 +12,8 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/track" element={<Stracker />} />
-        {/* redirect any unknown path to /track or home; choose one */}
-        <Route path="*" element={<Navigate to="/track" replace />} />
+        <Route path="/predict" element={<CollisionPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   )
