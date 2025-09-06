@@ -1,142 +1,287 @@
+// // frontend/src/components/Globe3D.jsx
 // import React, { useEffect, useRef } from 'react'
 // import * as THREE from 'three'
 // import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
-// // Helper to build a line from an array of {x,y,z}
-// function buildLine(points){
-//   const geometry = new THREE.BufferGeometry()
+// // ---------- helpers ----------
+// function buildLine(points) {
+//   const g = new THREE.BufferGeometry()
 //   const arr = new Float32Array(points.length * 3)
-//   for(let i=0;i<points.length;i++){
-//     arr[i*3+0] = points[i].x
-//     arr[i*3+1] = points[i].y
-//     arr[i*3+2] = points[i].z
+//   for (let i = 0; i < points.length; i++) {
+//     arr[i * 3 + 0] = points[i].x
+//     arr[i * 3 + 1] = points[i].y
+//     arr[i * 3 + 2] = points[i].z
 //   }
-//   geometry.setAttribute('position', new THREE.BufferAttribute(arr, 3))
-//   const material = new THREE.LineBasicMaterial({ linewidth: 1 })
-//   const line = new THREE.Line(geometry, material)
-//   return { line, geometry }
+//   g.setAttribute('position', new THREE.BufferAttribute(arr, 3))
+//   return new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x67d4ff }))
 // }
 
-// export default function Globe3D({ orbitPoints, satPosition, neighbors }){
+// // Fresnel atmosphere shader (inline, no extra files)
+// function getFresnelMat({ rimHex = 0x0088ff, facingHex = 0x000000 } = {}) {
+//   const uniforms = {
+//     color1: { value: new THREE.Color(rimHex) },
+//     color2: { value: new THREE.Color(facingHex) },
+//     fresnelBias: { value: 0.1 },
+//     fresnelScale: { value: 1.0 },
+//     fresnelPower: { value: 4.0 },
+//   }
+//   const vs = `
+//     uniform float fresnelBias;
+//     uniform float fresnelScale;
+//     uniform float fresnelPower;
+//     varying float vReflectionFactor;
+//     void main() {
+//       vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+//       vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+//       vec3 worldNormal = normalize(mat3(modelMatrix) * normal);
+//       vec3 I = worldPosition.xyz - cameraPosition;
+//       vReflectionFactor = fresnelBias + fresnelScale * pow(1.0 + dot(normalize(I), worldNormal), fresnelPower);
+//       gl_Position = projectionMatrix * mvPosition;
+//     }
+//   `
+//   const fs = `
+//     uniform vec3 color1;
+//     uniform vec3 color2;
+//     varying float vReflectionFactor;
+//     void main() {
+//       float f = clamp(vReflectionFactor, 0.0, 1.0);
+//       gl_FragColor = vec4(mix(color2, color1, vec3(f)), f);
+//     }
+//   `
+//   return new THREE.ShaderMaterial({
+//     uniforms,
+//     vertexShader: vs,
+//     fragmentShader: fs,
+//     transparent: true,
+//     blending: THREE.AdditiveBlending,
+//   })
+// }
+
+// // Simple starfield of point sprites
+// function getStarfield({ numStars = 2000 } = {}) {
+//   function randomSpherePoint() {
+//     const radius = Math.random() * 25 + 25
+//     const u = Math.random()
+//     const v = Math.random()
+//     const theta = 2 * Math.PI * u
+//     const phi = Math.acos(2 * v - 1)
+//     const x = radius * Math.sin(phi) * Math.cos(theta)
+//     const y = radius * Math.sin(phi) * Math.sin(theta)
+//     const z = radius * Math.cos(phi)
+//     return { pos: new THREE.Vector3(x, y, z), hue: 0.6 }
+//   }
+//   const verts = []
+//   const colors = []
+//   for (let i = 0; i < numStars; i++) {
+//     const { pos, hue } = randomSpherePoint()
+//     const col = new THREE.Color().setHSL(hue, 0.2, Math.random())
+//     verts.push(pos.x, pos.y, pos.z)
+//     colors.push(col.r, col.g, col.b)
+//   }
+//   const geo = new THREE.BufferGeometry()
+//   geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+//   geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+//   const mat = new THREE.PointsMaterial({
+//     size: 0.2,
+//     vertexColors: true,
+//     map: new THREE.TextureLoader().load('/textures/stars/circle.png'),
+//     transparent: true,
+//     depthWrite: false,
+//   })
+//   return new THREE.Points(geo, mat)
+// }
+
+// // ---------- component ----------
+// export default function Globe3D({ orbitPoints, satPosition, neighbors }) {
 //   const containerRef = useRef(null)
 //   const sceneRef = useRef()
-//   const lineRef = useRef()
-//   const satMeshRef = useRef()
-//   const neighborGroupRef = useRef()
 //   const rendererRef = useRef()
 //   const cameraRef = useRef()
-//   const earthRef = useRef()
+//   const lineRef = useRef()
+//   const satRef = useRef()
+//   const neighborGroupRef = useRef()
+//   const earthGroupRef = useRef()
 
-//   useEffect(()=>{
+//   useEffect(() => {
 //     const el = containerRef.current
 //     const scene = new THREE.Scene()
 //     scene.background = new THREE.Color('#0b1020')
 
-//     const camera = new THREE.PerspectiveCamera(45, el.clientWidth/el.clientHeight, 1, 100000)
-//     camera.position.set(0, -16000, 8000)
+//     const camera = new THREE.PerspectiveCamera(45, el.clientWidth / el.clientHeight, 1, 200000)
+//     camera.position.set(0, -18000, 9000)
 
 //     const renderer = new THREE.WebGLRenderer({ antialias: true })
 //     renderer.setSize(el.clientWidth, el.clientHeight)
+//     renderer.outputColorSpace = THREE.SRGBColorSpace
+//     renderer.toneMapping = THREE.ACESFilmicToneMapping
 //     el.appendChild(renderer.domElement)
 
 //     const controls = new OrbitControls(camera, renderer.domElement)
 //     controls.enableDamping = true
+//     controls.minDistance = 6800
+//     controls.maxDistance = 80000
 
 //     // Lights
-//     scene.add(new THREE.AmbientLight(0xffffff, 0.6))
-//     const dir = new THREE.DirectionalLight(0xffffff, 0.8)
-//     dir.position.set(-10000, 0, 5000)
-//     scene.add(dir)
+//     const sunLight = new THREE.DirectionalLight(0xffffff, 1.2)
+//     sunLight.position.set(-30000, 10000, 20000)
+//     scene.add(new THREE.AmbientLight(0xffffff, 0.35))
+//     scene.add(sunLight)
 
-//     // Earth
-//     const EARTH_RADIUS = 6371 // km
-//     const geom = new THREE.SphereGeometry(EARTH_RADIUS, 64, 64)
-//     const tex = new THREE.TextureLoader().load('https://raw.githubusercontent.com/treverix/threejs-earth-textures/master/2_no_clouds_4k.jpg')
-//     tex.anisotropy = 4
-//     const mat = new THREE.MeshPhongMaterial({ map: tex })
-//     const earth = new THREE.Mesh(geom, mat)
-//     scene.add(earth)
+//     // --- threejs-earth style globe ---
+//     const EARTH_R = 6371 // km scale consistent with your app
+//     const segs = 128
+//     const geometry = new THREE.SphereGeometry(EARTH_R, segs, segs)
+//     const loader = new THREE.TextureLoader()
 
-//     // Satellite mesh
-//     const satGeom = new THREE.SphereGeometry(60, 16, 16) // ~60 km radius for visibility
-//     const satMat = new THREE.MeshPhongMaterial({ color: 0xffee88, emissive: 0x222200 })
-//     const sat = new THREE.Mesh(satGeom, satMat)
+//     const dayMap = loader.load('/textures/00_earthmap1k.jpg')
+//     dayMap.colorSpace = THREE.SRGBColorSpace
+
+//     const lightsMap = loader.load('/textures/03_earthlights1k.jpg')
+//     lightsMap.colorSpace = THREE.SRGBColorSpace
+
+//     const cloudsMap = loader.load('/textures/04_earthcloudmap.jpg')
+//     cloudsMap.colorSpace = THREE.SRGBColorSpace
+
+//     const earthMat = new THREE.MeshPhongMaterial({
+//       map: dayMap,
+//       specularMap: loader.load('/textures/02_earthspec1k.jpg'),
+//       bumpMap: loader.load('/textures/01_earthbump1k.jpg'),
+//       bumpScale: 6.0, // tweak if you want subtler mountains
+//       shininess: 18,
+//     })
+
+//     const earthGroup = new THREE.Group()
+//     earthGroup.rotation.z = -23.4 * Math.PI / 180 // axial tilt
+
+//     const earthMesh = new THREE.Mesh(geometry, earthMat)
+//     earthGroup.add(earthMesh)
+
+//     const lightsMat = new THREE.MeshBasicMaterial({
+//       map: lightsMap,
+//       blending: THREE.AdditiveBlending,
+//       transparent: true,
+//       depthWrite: false,
+//     })
+//     const lightsMesh = new THREE.Mesh(geometry, lightsMat)
+//     earthGroup.add(lightsMesh)
+
+//     const cloudsMat = new THREE.MeshStandardMaterial({
+//       map: cloudsMap,
+//       alphaMap: loader.load('/textures/05_earthcloudmaptrans.jpg'),
+//       transparent: true,
+//       opacity: 0.85,
+//       blending: THREE.AdditiveBlending,
+//       depthWrite: false,
+//     })
+//     const cloudsMesh = new THREE.Mesh(geometry, cloudsMat)
+//     cloudsMesh.scale.setScalar(1.003)
+//     earthGroup.add(cloudsMesh)
+
+//     const glowMesh = new THREE.Mesh(geometry, getFresnelMat())
+//     glowMesh.scale.setScalar(1.01)
+//     earthGroup.add(glowMesh)
+
+//     scene.add(earthGroup)
+
+//     // Starfield
+//     const stars = getStarfield({ numStars: 2000 })
+//     scene.add(stars)
+
+//     // Satellite marker
+//     const sat = new THREE.Mesh(
+//       new THREE.SphereGeometry(60, 16, 16),
+//       new THREE.MeshPhongMaterial({ color: 0xffe58a, emissive: 0x332200 })
+//     )
 //     scene.add(sat)
 
-//     // Neighbor group
-//     const ng = new THREE.Group()
-//     scene.add(ng)
+//     // Neighbors group
+//     const neighborGroup = new THREE.Group()
+//     scene.add(neighborGroup)
 
+//     // Save refs
 //     sceneRef.current = scene
 //     rendererRef.current = renderer
 //     cameraRef.current = camera
-//     earthRef.current = earth
-//     satMeshRef.current = sat
-//     neighborGroupRef.current = ng
+//     satRef.current = sat
+//     neighborGroupRef.current = neighborGroup
+//     earthGroupRef.current = earthGroup
 
-//     const onResize = ()=>{
-//       const w = el.clientWidth, h = el.clientHeight
+//     // Resize
+//     const onResize = () => {
+//       const w = el.clientWidth,
+//         h = el.clientHeight
 //       renderer.setSize(w, h)
 //       camera.aspect = w / h
 //       camera.updateProjectionMatrix()
 //     }
 //     window.addEventListener('resize', onResize)
 
+//     // Render loop
 //     let raf
-//     const tick = ()=>{
+//     const tick = () => {
+//       // gentle rotations
+//       earthMesh.rotation.y += 0.002
+//       lightsMesh.rotation.y += 0.002
+//       cloudsMesh.rotation.y += 0.0023
+//       glowMesh.rotation.y += 0.002
+//       stars.rotation.y -= 0.0002
+
 //       controls.update()
 //       renderer.render(scene, camera)
 //       raf = requestAnimationFrame(tick)
 //     }
 //     tick()
 
-//     return ()=>{
+//     // Cleanup
+//     return () => {
 //       cancelAnimationFrame(raf)
 //       window.removeEventListener('resize', onResize)
 //       renderer.dispose()
-//       el.removeChild(renderer.domElement)
+//       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement)
+//       // dispose simple geometries/materials
+//       geometry.dispose()
+//       earthMat.dispose()
+//       lightsMat.dispose()
+//       cloudsMat.dispose()
+//       glowMesh.material.dispose()
 //     }
 //   }, [])
 
-//   // Update orbit line
-//   useEffect(()=>{
+//   // Update orbit line when points change
+//   useEffect(() => {
 //     const scene = sceneRef.current
-//     if(!scene) return
-
-//     if(lineRef.current){
+//     if (!scene) return
+//     if (lineRef.current) {
 //       scene.remove(lineRef.current)
 //       lineRef.current.geometry.dispose()
-//       // material auto disposed with GC
+//       lineRef.current.material.dispose()
 //       lineRef.current = null
 //     }
-//     if(orbitPoints && orbitPoints.length){
-//       const { line } = buildLine(orbitPoints)
-//       line.material.color = new THREE.Color('#67d4ff')
-//       lineRef.current = line
-//       scene.add(line)
+//     if (orbitPoints && orbitPoints.length) {
+//       lineRef.current = buildLine(orbitPoints)
+//       scene.add(lineRef.current)
 //     }
 //   }, [orbitPoints])
 
-//   // Update satellite + neighbors
-//   useEffect(()=>{
-//     if(satPosition && satMeshRef.current){
-//       satMeshRef.current.position.set(satPosition.x, satPosition.y, satPosition.z)
+//   // Update satellite position
+//   useEffect(() => {
+//     if (satPosition && satRef.current) {
+//       satRef.current.position.set(satPosition.x, satPosition.y, satPosition.z)
 //     }
 //   }, [satPosition])
 
-//   useEffect(()=>{
+//   // Update neighbor markers
+//   useEffect(() => {
 //     const ng = neighborGroupRef.current
-//     if(!ng) return
-//     // Clear old
-//     while(ng.children.length){
-//       const child = ng.children.pop()
-//       if(child.geometry) child.geometry.dispose()
-//       if(child.material) child.material.dispose()
+//     if (!ng) return
+//     while (ng.children.length) {
+//       const c = ng.children.pop()
+//       c.geometry?.dispose?.()
+//       c.material?.dispose?.()
 //     }
-//     if(!neighbors || !neighbors.length) return
-
+//     if (!neighbors || !neighbors.length) return
 //     const mat = new THREE.MeshBasicMaterial({ color: 0xff5c5c })
-//     for(const n of neighbors.slice(0,50)){
+//     for (const n of neighbors.slice(0, 80)) {
 //       const g = new THREE.SphereGeometry(40, 8, 8)
 //       const m = new THREE.Mesh(g, mat)
 //       m.position.set(n.x, n.y, n.z)
@@ -149,123 +294,202 @@
 
 
 
+// frontend/src/components/Globe3D.jsx
 import React, { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
-// Helper to build a line from an array of {x,y,z}
-function buildLine(points){
-  const geometry = new THREE.BufferGeometry()
+// ---------- helpers ----------
+function buildLine(points) {
+  const g = new THREE.BufferGeometry()
   const arr = new Float32Array(points.length * 3)
-  for (let i = 0; i < points.length; i++){
-    arr[i*3+0] = points[i].x
-    arr[i*3+1] = points[i].y
-    arr[i*3+2] = points[i].z
+  for (let i = 0; i < points.length; i++) {
+    arr[i * 3 + 0] = points[i].x
+    arr[i * 3 + 1] = points[i].y
+    arr[i * 3 + 2] = points[i].z
   }
-  geometry.setAttribute('position', new THREE.BufferAttribute(arr, 3))
-  const material = new THREE.LineBasicMaterial({ linewidth: 1, color: 0x67d4ff })
-  return new THREE.Line(geometry, material)
+  g.setAttribute('position', new THREE.BufferAttribute(arr, 3))
+  return new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x67d4ff }))
 }
 
-export default function Globe3D({ orbitPoints, satPosition, neighbors }){
+// Fresnel atmosphere shader (inline)
+function getFresnelMat({ rimHex = 0x0088ff, facingHex = 0x000000 } = {}) {
+  const uniforms = {
+    color1: { value: new THREE.Color(rimHex) },
+    color2: { value: new THREE.Color(facingHex) },
+    fresnelBias: { value: 0.1 },
+    fresnelScale: { value: 1.0 },
+    fresnelPower: { value: 4.0 },
+  }
+  const vs = `
+    uniform float fresnelBias;
+    uniform float fresnelScale;
+    uniform float fresnelPower;
+    varying float vReflectionFactor;
+    void main() {
+      vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+      vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+      vec3 worldNormal = normalize(mat3(modelMatrix) * normal);
+      vec3 I = worldPosition.xyz - cameraPosition;
+      vReflectionFactor = fresnelBias + fresnelScale * pow(1.0 + dot(normalize(I), worldNormal), fresnelPower);
+      gl_Position = projectionMatrix * mvPosition;
+    }
+  `
+  const fs = `
+    uniform vec3 color1;
+    uniform vec3 color2;
+    varying float vReflectionFactor;
+    void main() {
+      float f = clamp(vReflectionFactor, 0.0, 1.0);
+      gl_FragColor = vec4(mix(color2, color1, vec3(f)), f);
+    }
+  `
+  return new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader: vs,
+    fragmentShader: fs,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+  })
+}
+
+// Starfield (points)
+function getStarfield({ numStars = 2000 } = {}) {
+  function randomSpherePoint() {
+    const radius = Math.random() * 25 + 25
+    const u = Math.random()
+    const v = Math.random()
+    const theta = 2 * Math.PI * u
+    const phi = Math.acos(2 * v - 1)
+    return new THREE.Vector3(
+      radius * Math.sin(phi) * Math.cos(theta),
+      radius * Math.sin(phi) * Math.sin(theta),
+      radius * Math.cos(phi)
+    )
+  }
+  const verts = []
+  const colors = []
+  for (let i = 0; i < numStars; i++) {
+    const p = randomSpherePoint()
+    const col = new THREE.Color().setHSL(0.6, 0.2, Math.random())
+    verts.push(p.x, p.y, p.z)
+    colors.push(col.r, col.g, col.b)
+  }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+  const mat = new THREE.PointsMaterial({
+    size: 0.2,
+    vertexColors: true,
+    map: new THREE.TextureLoader().load('/textures/stars/circle.png'),
+    transparent: true,
+    depthWrite: false,
+  })
+  return new THREE.Points(geo, mat)
+}
+
+// ---------- component ----------
+export default function Globe3D({ orbitPoints, satPosition, neighbors }) {
   const containerRef = useRef(null)
   const sceneRef = useRef()
-  const lineRef = useRef()
-  const satMeshRef = useRef()
-  const neighborGroupRef = useRef()
   const rendererRef = useRef()
   const cameraRef = useRef()
-  const earthGroupRef = useRef()
+  const lineRef = useRef()
+  const satRef = useRef()
+  const neighborGroupRef = useRef()
 
   useEffect(() => {
     const el = containerRef.current
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color('#0000FF')
+    scene.background = new THREE.Color('#0b1020')
 
-    const camera = new THREE.PerspectiveCamera(45, el.clientWidth/el.clientHeight, 1, 200000)
+    const camera = new THREE.PerspectiveCamera(45, el.clientWidth / el.clientHeight, 1, 200000)
     camera.position.set(0, -18000, 9000)
 
     const renderer = new THREE.WebGLRenderer({ antialias: true })
     renderer.setSize(el.clientWidth, el.clientHeight)
-    // color management for realistic textures
     renderer.outputColorSpace = THREE.SRGBColorSpace
+    renderer.toneMapping = THREE.ACESFilmicToneMapping
     el.appendChild(renderer.domElement)
 
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
+    controls.dampingFactor = 0.05
     controls.minDistance = 6800
-    controls.maxDistance = 60000
+    controls.maxDistance = 80000
+    controls.autoRotate = false // keep earth stationary
 
-    // Lighting
+    // Lights
+    const sunLight = new THREE.DirectionalLight(0xffffff, 1.2)
+    sunLight.position.set(-30000, 10000, 20000)
     scene.add(new THREE.AmbientLight(0xffffff, 0.35))
-    const sun = new THREE.DirectionalLight(0xffffff, 1.1)
-    sun.position.set(-30000, 10000, 20000)
-    scene.add(sun)
+    scene.add(sunLight)
 
-    // ---- Realistic Earth ----
-    const EARTH_RADIUS = 6371 // km
-
+    // Earth group (axial tilt only; no rotation in tick)
+    const EARTH_R = 6371
+    const segs = 128
+    const geometry = new THREE.SphereGeometry(EARTH_R, segs, segs)
     const loader = new THREE.TextureLoader()
-    // Use local /public textures (recommended) or replace with URLs
-    const dayTex     = loader.load('/textures/earth_day.jpg');     dayTex.colorSpace = THREE.SRGBColorSpace
-    const specTex    = loader.load('/textures/earth_spec.jpg')
-    const normalTex  = loader.load('/textures/earth_normal.jpg')   // or bump map
-    const cloudsTex  = loader.load('/textures/earth_clouds.png');  cloudsTex.colorSpace = THREE.SRGBColorSpace
-    const starsTex   = loader.load('/textures/stars_2048.jpg');    starsTex.colorSpace = THREE.SRGBColorSpace
 
-    // Earth surface (Phong for specular highlights on oceans)
-    const earthGeo = new THREE.SphereGeometry(EARTH_RADIUS, 96, 96)
-    const earthMat = new THREE.MeshPhongMaterial({
-      map: dayTex,
-      specularMap: specTex,
-      specular: new THREE.Color(0x333333),
-      shininess: 18,
-      normalMap: normalTex,
-      normalScale: new THREE.Vector2(1.0, 1.0)
-      // If you only have a bump map, use: bumpMap: bumpTex, bumpScale: 6
-    })
-    const earthMesh = new THREE.Mesh(earthGeo, earthMat)
+    const dayMap = loader.load('/textures/00_earthmap1k.jpg', t => (t.colorSpace = THREE.SRGBColorSpace))
+    const lightsMap = loader.load('/textures/03_earthlights1k.jpg', t => (t.colorSpace = THREE.SRGBColorSpace))
+    const cloudsMap = loader.load('/textures/04_earthcloudmap.jpg', t => (t.colorSpace = THREE.SRGBColorSpace))
+    const specMap = loader.load('/textures/02_earthspec1k.jpg')
+    const bumpMap = loader.load('/textures/01_earthbump1k.jpg')
+    const alphaMap = loader.load('/textures/05_earthcloudmaptrans.jpg')
 
-    // Cloud layer (slightly bigger radius, transparent)
-    const cloudsGeo = new THREE.SphereGeometry(EARTH_RADIUS * 1.004, 96, 96)
-    const cloudsMat = new THREE.MeshLambertMaterial({
-      map: cloudsTex,
-      transparent: true,
-      opacity: 0.9,
-      depthWrite: false
-    })
-    const cloudsMesh = new THREE.Mesh(cloudsGeo, cloudsMat)
-
-    // Atmosphere glow (subtle)
-    const atmGeo = new THREE.SphereGeometry(EARTH_RADIUS * 1.02, 64, 64)
-    const atmMat = new THREE.MeshBasicMaterial({
-      color: 0x3aa7ff,
-      transparent: true,
-      opacity: 0.07,
-      side: THREE.BackSide
-    })
-    const atmMesh = new THREE.Mesh(atmGeo, atmMat)
-
-    // Group the earth components so we can rotate them together
     const earthGroup = new THREE.Group()
+    earthGroup.rotation.z = -23.4 * Math.PI / 180 // axial tilt
+
+    const earthMat = new THREE.MeshPhongMaterial({
+      map: dayMap,
+      specularMap: specMap,
+      bumpMap,
+      bumpScale: 6.0,
+      shininess: 18,
+    })
+    const earthMesh = new THREE.Mesh(geometry, earthMat)
     earthGroup.add(earthMesh)
+
+    const lightsMat = new THREE.MeshBasicMaterial({
+      map: lightsMap,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+    })
+    const lightsMesh = new THREE.Mesh(geometry, lightsMat)
+    earthGroup.add(lightsMesh)
+
+    const cloudsMat = new THREE.MeshStandardMaterial({
+      map: cloudsMap,
+      alphaMap,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+    const cloudsMesh = new THREE.Mesh(geometry, cloudsMat)
+    cloudsMesh.scale.setScalar(1.003)
     earthGroup.add(cloudsMesh)
-    earthGroup.add(atmMesh)
+
+    const glowMesh = new THREE.Mesh(geometry, getFresnelMat())
+    glowMesh.scale.setScalar(1.01)
+    earthGroup.add(glowMesh)
+
     scene.add(earthGroup)
 
-    // Starfield (big inside-out sphere)
-    const starsGeo = new THREE.SphereGeometry(120000, 32, 32)
-    const starsMat = new THREE.MeshBasicMaterial({ map: starsTex, side: THREE.BackSide })
-    const starfield = new THREE.Mesh(starsGeo, starsMat)
-    scene.add(starfield)
+    // Starfield
+    const stars = getStarfield({ numStars: 2000 })
+    scene.add(stars)
 
     // Satellite marker
-    const satGeom = new THREE.SphereGeometry(60, 16, 16)
-    const satMat  = new THREE.MeshPhongMaterial({ color: 0xffe58a, emissive: 0x332200 })
-    const sat = new THREE.Mesh(satGeom, satMat)
+    const sat = new THREE.Mesh(
+      new THREE.SphereGeometry(60, 16, 16),
+      new THREE.MeshPhongMaterial({ color: 0xffe58a, emissive: 0x332200 })
+    )
     scene.add(sat)
 
-    // Neighbor markers (red)
+    // Neighbors group
     const neighborGroup = new THREE.Group()
     scene.add(neighborGroup)
 
@@ -273,9 +497,8 @@ export default function Globe3D({ orbitPoints, satPosition, neighbors }){
     sceneRef.current = scene
     rendererRef.current = renderer
     cameraRef.current = camera
-    satMeshRef.current = sat
+    satRef.current = sat
     neighborGroupRef.current = neighborGroup
-    earthGroupRef.current = earthGroup
 
     // Resize
     const onResize = () => {
@@ -286,62 +509,64 @@ export default function Globe3D({ orbitPoints, satPosition, neighbors }){
     }
     window.addEventListener('resize', onResize)
 
+    // Render loop — NO auto-rotation (earth is stationary)
     let raf
     const tick = () => {
-      // Slow rotation for day/night feel
-      earthGroup.rotation.y += 0.00015
-      cloudsMesh.rotation.y += 0.00022
-
       controls.update()
       renderer.render(scene, camera)
       raf = requestAnimationFrame(tick)
     }
     tick()
 
+    // Cleanup
     return () => {
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', onResize)
       renderer.dispose()
-      el.removeChild(renderer.domElement)
+      if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement)
+      geometry.dispose()
+      earthMat.dispose()
+      lightsMat.dispose()
+      cloudsMat.dispose()
+      glowMesh.material.dispose()
     }
   }, [])
 
-  // Update orbit line
+  // Update orbit line when points change
   useEffect(() => {
     const scene = sceneRef.current
     if (!scene) return
-    if (lineRef.current){
+    if (lineRef.current) {
       scene.remove(lineRef.current)
       lineRef.current.geometry.dispose()
       lineRef.current.material.dispose()
       lineRef.current = null
     }
-    if (orbitPoints?.length){
-      const line = buildLine(orbitPoints)
-      lineRef.current = line
-      scene.add(line)
+    if (orbitPoints && orbitPoints.length) {
+      lineRef.current = buildLine(orbitPoints)
+      scene.add(lineRef.current)
     }
   }, [orbitPoints])
 
   // Update satellite position
   useEffect(() => {
-    if (satPosition && satMeshRef.current){
-      satMeshRef.current.position.set(satPosition.x, satPosition.y, satPosition.z)
+    if (satPosition && satRef.current) {
+      satRef.current.position.set(satPosition.x, satPosition.y, satPosition.z)
     }
   }, [satPosition])
 
-  // Update neighbors
+  // Update neighbor markers
   useEffect(() => {
     const ng = neighborGroupRef.current
     if (!ng) return
-    while (ng.children.length){
-      const child = ng.children.pop()
-      child.geometry?.dispose?.()
-      child.material?.dispose?.()
+    while (ng.children.length) {
+      const c = ng.children.pop()
+      c.geometry?.dispose?.()
+      c.material?.dispose?.()
     }
-    if (!neighbors?.length) return
+    if (!neighbors || !neighbors.length) return
     const mat = new THREE.MeshBasicMaterial({ color: 0xff5c5c })
-    for (const n of neighbors.slice(0, 80)){
+    for (const n of neighbors.slice(0, 80)) {
       const g = new THREE.SphereGeometry(40, 8, 8)
       const m = new THREE.Mesh(g, mat)
       m.position.set(n.x, n.y, n.z)
