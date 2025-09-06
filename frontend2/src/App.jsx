@@ -116,8 +116,16 @@ export default function App(){
 
       <Tracker onTrack={handleTrack} loading={loading} />
 
+
+
       <div className="row">
-        <Globe3D orbitPoints={orbitPoints} satPosition={satPosition} neighbors={neighbors} />
+        {/* <Globe3D orbitPoints={orbitPoints} satPosition={satPosition} neighbors={neighbors} /> */}
+        <Globe3D
+  orbitPoints={orbitPoints}
+  satPosition={satPosition}
+  neighbors={neighbors}
+  mainName={satMeta?.name}
+/>
         <div className="list">
           <InfoCard satMeta={satMeta} info={info} />
           <Neighbors neighbors={neighbors} />
