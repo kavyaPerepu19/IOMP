@@ -47,11 +47,10 @@ export default function CollisionPredictor(){
       if(!pvNow.position) throw new Error('Could not propagate target')
       const ecfTargetNow = sat.eciToEcf(pvNow.position, gmstNow)
 
-      // Active catalog (sample more for better neighbor candidates)
+      // Active catalog — NO SUBSAMPLING: consider all entries
       const activeTxt = await fetchActiveTLEs()
       const all = parseActiveText(activeTxt)
-      const SUBSAMPLE = 10
-      const subset = all.filter((_,i)=> i % SUBSAMPLE === 0)
+      const subset = all // <- use all satellites
 
       // Find nearest @ now (in ECF)
       const neighbors = []
@@ -185,7 +184,7 @@ export default function CollisionPredictor(){
 
   return (
     <div className="card" style={{marginTop:20}}>
-      <h3>🚨 Collision Predictor (48h closest-approach · 20 neighbors)</h3>
+      <h3>🚨 Collision Predictor (48h closest-approach · 20 nearest from full catalog)</h3>
       <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
         <input
           value={target}
