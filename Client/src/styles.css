@@ -59,3 +59,122 @@ button:hover{ filter:brightness(1.15); }
   border-color: #33427a;
   background: #19224a;
 }
+/* ---- Simulator form layout ---- */
+.form-title {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.form-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.switch-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 1100px) {
+  .form-grid {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #0b1020;
+  border: 1px solid #1f2747;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.form-row label {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.form-row input,
+.form-row select {
+  width: 100%;
+  border: 1px solid #2a335b;
+  background: #0f1430;
+  color: #e6ecff;
+  border-radius: 10px;
+  padding: 8px 10px;
+  outline: none;
+}
+
+.form-row input:focus,
+.form-row select:focus {
+  border-color: #3b4aa0;
+  box-shadow: 0 0 0 2px rgba(59, 74, 160, 0.25);
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.form-actions button {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid #2a335b;
+  background: #19224a;
+  color: #e6ecff;
+  cursor: pointer;
+}
+.form-actions button:hover {
+  background: #202a5b;
+  border-color: #3b4aa0;
+}
+
+/* ---- Results ---- */
+.result-card {
+  margin-top: 14px;
+  background: #0f1430;
+  border: 1px solid #1f2747;
+  border-radius: 14px;
+}
+
+.result-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 1200px) {
+  .result-grid { grid-template-columns: repeat(2, minmax(220px, 1fr)); }
+}
+@media (max-width: 700px) {
+  .result-grid { grid-template-columns: 1fr; }
+}
+
+.result-box {
+  background: #0b1020;
+  border: 1px solid #1f2747;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.muted { opacity: .8; }
+.tiny { font-size: 12px; }

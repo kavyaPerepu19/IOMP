@@ -4,6 +4,7 @@ import Navbar from './components/Navbar'
 import Home from './pages/Home'
 import Stracker from './pages/Stracker'
 import CollisionPage from './pages/CollisionPage'
+import SimulationPredictor from './components/SimulationPredictor'
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/track" element={<Stracker />} />
         <Route path="/predict" element={<CollisionPage />} />
+        <Route path='/simulate' element={<SimulationPredictor />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
