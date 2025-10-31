@@ -59,17 +59,21 @@ function getStarfield({ numStars = 2000 } = {}) {
       radius * Math.cos(phi)
     )
   }
+
   const verts = []
   const colors = []
+
   for (let i = 0; i < numStars; i++) {
     const p = randomSpherePoint()
     const col = new THREE.Color().setHSL(0.6, 0.2, Math.random())
     verts.push(p.x, p.y, p.z)
     colors.push(col.r, col.g, col.b)
   }
+
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
   geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+
   const mat = new THREE.PointsMaterial({
     size: 0.2,
     vertexColors: true,
@@ -77,10 +81,17 @@ function getStarfield({ numStars = 2000 } = {}) {
     transparent: true,
     depthWrite: false,
   })
+
   return new THREE.Points(geo, mat)
 }
 
-export default function Globe3D({ orbitPoints, satPosition, neighbors, mainName = 'Satellite' }) {
+export default function Globe3D({
+  orbitPoints,
+  satPosition,
+  neighbors,
+  mainName = 'Satellite',
+  maxNeighbors = 80, // how many red neighbor dots to actually render
+}) {
   const containerRef = useRef(null)
   const sceneRef = useRef()
   const rendererRef = useRef()
@@ -90,28 +101,51 @@ export default function Globe3D({ orbitPoints, satPosition, neighbors, mainName 
   const lineRef = useRef()
   const lineMatRef = useRef()
 
-  // Raycast + tooltip
+  // raycast / hover tooltip
   const raycasterRef = useRef()
   const mouseRef = useRef(new THREE.Vector2())
   const tooltipRef = useRef()
-  const hoverablesRef = useRef([]) // objects to test
+  const hoverablesRef = useRef([])
 
-  // Build bold orbit line (Line2)
+  // ---------- orbit line builder ----------
+  // We clamp visual altitude so that super high orbits (like GEO) still look sane.
+  // Real altitude might be 35,786 km, but we draw the path at min(realAlt, 2000 km).
   function buildBoldLine(points) {
+    const EARTH_R = 6371 // km
+    const MAX_DISPLAY_ALT = 2000 // km cap for visualization
+
+    if (!points || points.length < 2) return null
+
+    // get the approximate orbital altitude from the first point
+    const { x: x0, y: y0, z: z0 } = points[0]
+    const r0 = Math.sqrt(x0 * x0 + y0 * y0 + z0 * z0)
+    const realAlt = r0 - EARTH_R
+
+    // clamp altitude for display
+    const displayAlt = Math.min(realAlt, MAX_DISPLAY_ALT)
+    const displayRadius = EARTH_R + displayAlt
+
     const positions = []
     for (let i = 0; i < points.length; i++) {
-      positions.push(points[i].x, points[i].y, points[i].z)
+      const { x, y, z } = points[i]
+      const r = Math.sqrt(x * x + y * y + z * z)
+      if (r === 0) continue
+      const scale = displayRadius / r
+      positions.push(x * scale, y * scale, z * scale)
     }
+
     const geometry = new LineGeometry()
     geometry.setPositions(positions)
 
     const material = new LineMaterial({
-      color: 0xffff00,   // bright yellow
-      linewidth: 4,      // px thickness (screen-space)
+      color: 0xffff00,
+      linewidth: 4,
       transparent: true,
       opacity: 0.95,
       dashed: false,
     })
+
+    // lineMaterial needs to know renderer size for pixel linewidth
     const renderer = rendererRef.current
     if (renderer) {
       const size = renderer.getSize(new THREE.Vector2())
@@ -126,6 +160,7 @@ export default function Globe3D({ orbitPoints, satPosition, neighbors, mainName 
     return line
   }
 
+  // ---------- scene init ----------
   useEffect(() => {
     const el = containerRef.current
 
@@ -147,10 +182,16 @@ export default function Globe3D({ orbitPoints, satPosition, neighbors, mainName 
     el.appendChild(tip)
     tooltipRef.current = tip
 
+    // Scene / camera / renderer
     const scene = new THREE.Scene()
     scene.background = new THREE.Color('#0b1020')
 
-    const camera = new THREE.PerspectiveCamera(45, el.clientWidth / el.clientHeight, 1, 200000)
+    const camera = new THREE.PerspectiveCamera(
+      45,
+      el.clientWidth / el.clientHeight,
+      1,
+      200000
+    )
     camera.position.set(0, -18000, 9000)
 
     const renderer = new THREE.WebGLRenderer({ antialias: true })
@@ -172,21 +213,30 @@ export default function Globe3D({ orbitPoints, satPosition, neighbors, mainName 
     scene.add(new THREE.AmbientLight(0xffffff, 0.35))
     scene.add(sunLight)
 
-    // Earth
+    // Earth + glow + clouds + lights
     const EARTH_R = 6371
     const segs = 128
     const geometry = new THREE.SphereGeometry(EARTH_R, segs, segs)
     const loader = new THREE.TextureLoader()
 
-    const dayMap = loader.load('/textures/00_earthmap1k.jpg', t => (t.colorSpace = THREE.SRGBColorSpace))
-    const lightsMap = loader.load('/textures/03_earthlights1k.jpg', t => (t.colorSpace = THREE.SRGBColorSpace))
-    const cloudsMap = loader.load('/textures/04_earthcloudmap.jpg', t => (t.colorSpace = THREE.SRGBColorSpace))
+    const dayMap = loader.load(
+      '/textures/00_earthmap1k.jpg',
+      t => (t.colorSpace = THREE.SRGBColorSpace)
+    )
+    const lightsMap = loader.load(
+      '/textures/03_earthlights1k.jpg',
+      t => (t.colorSpace = THREE.SRGBColorSpace)
+    )
+    const cloudsMap = loader.load(
+      '/textures/04_earthcloudmap.jpg',
+      t => (t.colorSpace = THREE.SRGBColorSpace)
+    )
     const specMap = loader.load('/textures/02_earthspec1k.jpg')
     const bumpMap = loader.load('/textures/01_earthbump1k.jpg')
     const alphaMap = loader.load('/textures/05_earthcloudmaptrans.jpg')
 
     const earthGroup = new THREE.Group()
-    earthGroup.rotation.z = -23.4 * Math.PI / 180
+    earthGroup.rotation.z = (-23.4 * Math.PI) / 180 // axial tilt
 
     const earthMat = new THREE.MeshPhongMaterial({
       map: dayMap,
@@ -229,7 +279,7 @@ export default function Globe3D({ orbitPoints, satPosition, neighbors, mainName 
     const stars = getStarfield({ numStars: 2000 })
     scene.add(stars)
 
-    // Main satellite — yellow + halo
+    // Main satellite (yellow) with halo sprite
     const satGeom = new THREE.SphereGeometry(120, 24, 24)
     const satMat = new THREE.MeshPhongMaterial({
       color: 0xffee00,
@@ -253,31 +303,31 @@ export default function Globe3D({ orbitPoints, satPosition, neighbors, mainName 
     sat.add(halo)
     scene.add(sat)
 
-    // Neighbors
+    // Group to hold neighbor dots
     const neighborGroup = new THREE.Group()
     scene.add(neighborGroup)
 
-    // Raycaster setup
+    // Raycaster for hover names
     const raycaster = new THREE.Raycaster()
     raycasterRef.current = raycaster
-    hoverablesRef.current = [sat] // neighbors will be added later
+    hoverablesRef.current = [sat] // we'll push neighbors in later
 
-    const onPointerMove = (e) => {
+    const onPointerMove = e => {
       const rect = renderer.domElement.getBoundingClientRect()
       const x = ((e.clientX - rect.left) / rect.width) * 2 - 1
       const y = -((e.clientY - rect.top) / rect.height) * 2 + 1
       mouseRef.current.set(x, y)
 
       raycaster.setFromCamera(mouseRef.current, camera)
-      // test against current hoverables
       const hits = raycaster.intersectObjects(hoverablesRef.current, true)
+
       if (hits.length > 0) {
         let obj = hits[0].object
-        // if sprite/child was hit, climb to the parent with userData.name if present
+        // climb to parent with userData.name if we hit sprite/child
         while (obj && !obj.userData?.name && obj.parent) obj = obj.parent
-        const name = obj?.userData?.name
-        if (name) {
-          tooltipRef.current.textContent = name
+        const nm = obj?.userData?.name
+        if (nm) {
+          tooltipRef.current.textContent = nm
           tooltipRef.current.style.left = `${e.clientX - rect.left}px`
           tooltipRef.current.style.top = `${e.clientY - rect.top}px`
           tooltipRef.current.style.display = 'block'
@@ -285,21 +335,24 @@ export default function Globe3D({ orbitPoints, satPosition, neighbors, mainName 
           return
         }
       }
+
       tooltipRef.current.style.display = 'none'
       renderer.domElement.style.cursor = 'default'
     }
+
     renderer.domElement.addEventListener('pointermove', onPointerMove)
 
-    // Save refs
+    // Save refs for later effects
     sceneRef.current = scene
     rendererRef.current = renderer
     cameraRef.current = camera
     satRef.current = sat
     neighborGroupRef.current = neighborGroup
 
-    // Resize + update line material resolution
+    // keep orbit line material resolution correct on resize
     const onResize = () => {
-      const w = el.clientWidth, h = el.clientHeight
+      const w = el.clientWidth
+      const h = el.clientHeight
       renderer.setSize(w, h)
       camera.aspect = w / h
       camera.updateProjectionMatrix()
@@ -321,9 +374,12 @@ export default function Globe3D({ orbitPoints, satPosition, neighbors, mainName 
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', onResize)
       renderer.domElement.removeEventListener('pointermove', onPointerMove)
+
       tooltipRef.current && el.removeChild(tooltipRef.current)
+
       renderer.dispose()
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement)
+
       geometry.dispose()
       earthMat.dispose()
       lightsMat.dispose()
@@ -332,6 +388,7 @@ export default function Globe3D({ orbitPoints, satPosition, neighbors, mainName 
       satGeom.dispose()
       satMat.dispose()
       haloMat.map?.dispose?.()
+
       if (lineRef.current) {
         lineRef.current.geometry.dispose()
         lineRef.current.material.dispose()
@@ -339,57 +396,67 @@ export default function Globe3D({ orbitPoints, satPosition, neighbors, mainName 
     }
   }, [mainName])
 
-  // Update orbit line
+  // ---------- orbit line update ----------
   useEffect(() => {
     const scene = sceneRef.current
     if (!scene) return
+
+    // remove old orbit line
     if (lineRef.current) {
       scene.remove(lineRef.current)
       lineRef.current.geometry.dispose()
       lineRef.current.material.dispose()
       lineRef.current = null
     }
+
     if (orbitPoints && orbitPoints.length) {
       const line = buildBoldLine(orbitPoints)
-      lineRef.current = line
-      scene.add(line)
+      if (line) {
+        lineRef.current = line
+        scene.add(line)
+      }
     }
   }, [orbitPoints])
 
-  // Update main satellite position
+  // ---------- main satellite position update ----------
   useEffect(() => {
     if (satPosition && satRef.current) {
       satRef.current.position.set(satPosition.x, satPosition.y, satPosition.z)
     }
   }, [satPosition])
 
-  // Update neighbors (bigger) + bind names for hover
+  // ---------- neighbor dots update ----------
   useEffect(() => {
     const ng = neighborGroupRef.current
     if (!ng) return
-    // clear old
+
+    // clear any previous neighbors
     while (ng.children.length) {
       const c = ng.children.pop()
       c.geometry?.dispose?.()
       c.material?.dispose?.()
     }
 
+    // reset hoverables to just the main sat, we re-add neighbors below
     const hoverables = hoverablesRef.current || []
-    // Keep only the main sat in hoverables; we'll re-add neighbors
     hoverablesRef.current = hoverables.filter(o => o === satRef.current)
 
     if (!neighbors || !neighbors.length) return
 
     const mat = new THREE.MeshBasicMaterial({ color: 0xff5c5c })
-    for (const n of neighbors.slice(0, 80)) {
-      const g = new THREE.SphereGeometry(80, 12, 12) // larger neighbors
+    const cap = (typeof maxNeighbors === 'number' ? maxNeighbors : 80)
+
+    for (const n of neighbors.slice(0, cap)) {
+      const g = new THREE.SphereGeometry(80, 12, 12)
       const m = new THREE.Mesh(g, mat)
+
       m.position.set(n.x, n.y, n.z)
       m.userData = { name: n.name || 'Neighbor' }
+
       ng.add(m)
       hoverablesRef.current.push(m)
     }
-  }, [neighbors])
+  }, [neighbors, maxNeighbors])
 
   return <div id="globe-container" className="card" ref={containerRef}></div>
 }

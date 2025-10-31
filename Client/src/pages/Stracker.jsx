@@ -35,15 +35,25 @@ export default function Stracker(){
   const [satMeta, setSatMeta] = useState({})
   const [info, setInfo] = useState(null)
 
-  async function handleTrack(name){
+  // NEW: how many neighbors the user wants to display
+  const [maxNeighbors, setMaxNeighbors] = useState(10)
+
+  async function handleTrack(name, numFromUser){
     setLoading(true)
     setInfo(null)
+
+    // save the chosen neighbor cap
+    if (typeof numFromUser === 'number' && numFromUser > 0) {
+      setMaxNeighbors(numFromUser)
+    }
+
     try{
+      // 1. Fetch TLE for the requested sat
       const tle = await fetchTLEByName(name)
       const { line1, line2, name: resolvedName } = tle
       const satrec = sat.twoline2satrec(line1, line2)
 
-      // Now position + subpoint now
+      // 2. Current position
       const now = new Date()
       const pv = sat.propagate(satrec, now)
       const positionEci = pv.position // km
@@ -54,15 +64,22 @@ export default function Stracker(){
       const alt_km = geodetic.height // km
       const ecfNow = eciToEcefKm(positionEci, gmst)
 
-      setSatMeta({ name: resolvedName, lat, lon, alt_km, timestamp: now.toISOString() })
+      setSatMeta({
+        name: resolvedName,
+        lat,
+        lon,
+        alt_km,
+        timestamp: now.toISOString()
+      })
       setSatPosition(ecefToVec3(ecfNow))
 
-      // Build orbit path for ~1 period
-      const mm = satrec.no_kozai || satrec.no // radians/min
+      // 3. Build orbit path ~1 period
+      const mm = satrec.no_kozai || satrec.no // rad/min
       const rev_per_day = mm * (1440/(2*Math.PI))
       const period_min = 1440 / rev_per_day
       const steps = 360
       const dt = (period_min*60*1000) / steps
+
       const pts = []
       for(let i=0;i<=steps;i++){
         const t = new Date(now.getTime() + i*dt)
@@ -73,10 +90,12 @@ export default function Stracker(){
       }
       setOrbitPoints(pts)
 
-      // Neighbors: get active catalog (subsample for perf)
+      // 4. Compute nearby sats
       const activeTxt = await fetchActiveTLEs()
       const all = parseActiveText(activeTxt)
-      const SUBSAMPLE = 20 // keep every 20th to limit workload
+
+      // Subsample for perf
+      const SUBSAMPLE = 20
       const subset = all.filter((_,i)=> i % SUBSAMPLE === 0)
 
       const neighborsNow = []
@@ -87,20 +106,37 @@ export default function Stracker(){
           const pvN = sat.propagate(sr, now)
           if(!pvN.position) continue
           const ecfN = sat.eciToEcf(pvN.position, gmst)
+
           const dx = ecfN.x - p0.x
           const dy = ecfN.y - p0.y
           const dz = ecfN.z - p0.z
           const dist = Math.sqrt(dx*dx+dy*dy+dz*dz)
+
           const gd = sat.eciToGeodetic(pvN.position, gmst)
           const altN = gd.height
-          neighborsNow.push({ name: s.name, distance_km: dist, alt_km: altN, x: ecfN.x, y: ecfN.y, z: ecfN.z })
-        }catch{ /* ignore bad TLEs */ }
-      }
-      neighborsNow.sort((a,b)=> a.distance_km - b.distance_km)
-      setNeighbors(neighborsNow.slice(0,50))
 
+          neighborsNow.push({
+            name: s.name,
+            distance_km: dist,
+            alt_km: altN,
+            x: ecfN.x,
+            y: ecfN.y,
+            z: ecfN.z
+          })
+        }catch{
+          // ignore bad TLEs
+        }
+      }
+
+      neighborsNow.sort((a,b)=> a.distance_km - b.distance_km)
+
+      // store a generous chunk (so we can slice later in render)
+      setNeighbors(neighborsNow.slice(0, 200))
+
+      // 5. Optional info card data
       const ii = await fetchInfo(resolvedName)
       setInfo(ii)
+
     }catch(err){
       alert("Error: " + (err?.response?.data?.error || err.message))
     }finally{
@@ -116,19 +152,22 @@ export default function Stracker(){
 
       <Tracker onTrack={handleTrack} loading={loading} />
 
-
-
       <div className="row">
-        {/* <Globe3D orbitPoints={orbitPoints} satPosition={satPosition} neighbors={neighbors} /> */}
         <Globe3D
-  orbitPoints={orbitPoints}
-  satPosition={satPosition}
-  neighbors={neighbors}
-  mainName={satMeta?.name}
-/>
+          orbitPoints={orbitPoints}
+          satPosition={satPosition}
+          neighbors={neighbors}
+          mainName={satMeta?.name}
+          maxNeighbors={maxNeighbors}    // << pass cap to globe
+        />
+
         <div className="list">
           <InfoCard satMeta={satMeta} info={info} />
-          <Neighbors neighbors={neighbors} />
+
+          <Neighbors
+            neighbors={neighbors}
+            maxNeighbors={maxNeighbors}   // << pass cap to table
+          />
         </div>
       </div>
     </div>

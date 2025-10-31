@@ -703,6 +703,8 @@ function fdRelVel(satrecA, satrecB, epoch){
   return Math.sqrt(dvx*dvx + dvy*dvy + dvz*dvz)
 }
 
+
+
 function clamp(x, a, b){ return Math.max(a, Math.min(b, x)) }
 
 function riskFrom(distKm, vrel, densityFactor){
