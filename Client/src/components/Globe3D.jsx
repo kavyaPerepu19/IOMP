@@ -5,7 +5,7 @@ import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
 
-// ---------- helpers ----------
+// ---------- Fresnel glow for Earth limb ----------
 function getFresnelMat({ rimHex = 0x0088ff, facingHex = 0x000000 } = {}) {
   const uniforms = {
     color1: { value: new THREE.Color(rimHex) },
@@ -14,6 +14,7 @@ function getFresnelMat({ rimHex = 0x0088ff, facingHex = 0x000000 } = {}) {
     fresnelScale: { value: 1.0 },
     fresnelPower: { value: 4.0 },
   }
+
   const vs = `
     uniform float fresnelBias;
     uniform float fresnelScale;
@@ -24,10 +25,14 @@ function getFresnelMat({ rimHex = 0x0088ff, facingHex = 0x000000 } = {}) {
       vec4 worldPosition = modelMatrix * vec4(position, 1.0);
       vec3 worldNormal = normalize(mat3(modelMatrix) * normal);
       vec3 I = worldPosition.xyz - cameraPosition;
-      vReflectionFactor = fresnelBias + fresnelScale * pow(1.0 + dot(normalize(I), worldNormal), fresnelPower);
+      vReflectionFactor =
+        fresnelBias +
+        fresnelScale *
+        pow(1.0 + dot(normalize(I), worldNormal), fresnelPower);
       gl_Position = projectionMatrix * mvPosition;
     }
   `
+
   const fs = `
     uniform vec3 color1;
     uniform vec3 color2;
@@ -37,6 +42,7 @@ function getFresnelMat({ rimHex = 0x0088ff, facingHex = 0x000000 } = {}) {
       gl_FragColor = vec4(mix(color2, color1, vec3(f)), f);
     }
   `
+
   return new THREE.ShaderMaterial({
     uniforms,
     vertexShader: vs,
@@ -46,8 +52,10 @@ function getFresnelMat({ rimHex = 0x0088ff, facingHex = 0x000000 } = {}) {
   })
 }
 
+// ---------- Starfield backdrop ----------
 function getStarfield({ numStars = 2000 } = {}) {
   function randomSpherePoint() {
+    // random shell between radius 25..50 (scene units)
     const radius = Math.random() * 25 + 25
     const u = Math.random()
     const v = Math.random()
@@ -85,12 +93,24 @@ function getStarfield({ numStars = 2000 } = {}) {
   return new THREE.Points(geo, mat)
 }
 
+// ---------- helper: lat/lon -> Earth-fixed xyz ----------
+function latLonToECEF(latDeg, lonDeg, radiusKm) {
+  const lat = (latDeg * Math.PI) / 180
+  const lon = (lonDeg * Math.PI) / 180
+  return {
+    x: radiusKm * Math.cos(lat) * Math.cos(lon),
+    y: radiusKm * Math.cos(lat) * Math.sin(lon),
+    z: radiusKm * Math.sin(lat),
+  }
+}
+
 export default function Globe3D({
   orbitPoints,
   satPosition,
   neighbors,
   mainName = 'Satellite',
-  maxNeighbors = 80, // how many red neighbor dots to actually render
+  maxNeighbors = 80,
+  showInsat = false, // <--- only true if user searched INSAT
 }) {
   const containerRef = useRef(null)
   const sceneRef = useRef()
@@ -98,30 +118,28 @@ export default function Globe3D({
   const cameraRef = useRef()
   const satRef = useRef()
   const neighborGroupRef = useRef()
+  const insatGroupRef = useRef()
   const lineRef = useRef()
   const lineMatRef = useRef()
 
-  // raycast / hover tooltip
+  // interaction refs
   const raycasterRef = useRef()
   const mouseRef = useRef(new THREE.Vector2())
   const tooltipRef = useRef()
   const hoverablesRef = useRef([])
 
-  // ---------- orbit line builder ----------
-  // We clamp visual altitude so that super high orbits (like GEO) still look sane.
-  // Real altitude might be 35,786 km, but we draw the path at min(realAlt, 2000 km).
+  // ---------- build orbit line with altitude clamp ----------
   function buildBoldLine(points) {
     const EARTH_R = 6371 // km
     const MAX_DISPLAY_ALT = 2000 // km cap for visualization
 
     if (!points || points.length < 2) return null
 
-    // get the approximate orbital altitude from the first point
+    // approximate orbit altitude from first point
     const { x: x0, y: y0, z: z0 } = points[0]
     const r0 = Math.sqrt(x0 * x0 + y0 * y0 + z0 * z0)
     const realAlt = r0 - EARTH_R
 
-    // clamp altitude for display
     const displayAlt = Math.min(realAlt, MAX_DISPLAY_ALT)
     const displayRadius = EARTH_R + displayAlt
 
@@ -145,7 +163,6 @@ export default function Globe3D({
       dashed: false,
     })
 
-    // lineMaterial needs to know renderer size for pixel linewidth
     const renderer = rendererRef.current
     if (renderer) {
       const size = renderer.getSize(new THREE.Vector2())
@@ -160,11 +177,11 @@ export default function Globe3D({
     return line
   }
 
-  // ---------- scene init ----------
+  // ---------- init scene (runs once) ----------
   useEffect(() => {
     const el = containerRef.current
 
-    // Tooltip div
+    // tooltip div overlay
     const tip = document.createElement('div')
     tip.style.position = 'absolute'
     tip.style.pointerEvents = 'none'
@@ -182,7 +199,7 @@ export default function Globe3D({
     el.appendChild(tip)
     tooltipRef.current = tip
 
-    // Scene / camera / renderer
+    // scene / camera / renderer
     const scene = new THREE.Scene()
     scene.background = new THREE.Color('#0b1020')
 
@@ -203,20 +220,20 @@ export default function Globe3D({
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.05
-    controls.minDistance = 6800
+    controls.minDistance = 6800   // ~just above Earth radius
     controls.maxDistance = 80000
     controls.autoRotate = false
 
-    // Lights
+    // lighting
     const sunLight = new THREE.DirectionalLight(0xffffff, 1.2)
     sunLight.position.set(-30000, 10000, 20000)
     scene.add(new THREE.AmbientLight(0xffffff, 0.35))
     scene.add(sunLight)
 
-    // Earth + glow + clouds + lights
+    // Earth + atmosphere layers
     const EARTH_R = 6371
     const segs = 128
-    const geometry = new THREE.SphereGeometry(EARTH_R, segs, segs)
+    const earthGeo = new THREE.SphereGeometry(EARTH_R, segs, segs)
     const loader = new THREE.TextureLoader()
 
     const dayMap = loader.load(
@@ -245,7 +262,7 @@ export default function Globe3D({
       bumpScale: 6.0,
       shininess: 18,
     })
-    const earthMesh = new THREE.Mesh(geometry, earthMat)
+    const earthMesh = new THREE.Mesh(earthGeo, earthMat)
     earthGroup.add(earthMesh)
 
     const lightsMat = new THREE.MeshBasicMaterial({
@@ -254,7 +271,7 @@ export default function Globe3D({
       transparent: true,
       depthWrite: false,
     })
-    const lightsMesh = new THREE.Mesh(geometry, lightsMat)
+    const lightsMesh = new THREE.Mesh(earthGeo, lightsMat)
     earthGroup.add(lightsMesh)
 
     const cloudsMat = new THREE.MeshStandardMaterial({
@@ -265,21 +282,21 @@ export default function Globe3D({
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     })
-    const cloudsMesh = new THREE.Mesh(geometry, cloudsMat)
+    const cloudsMesh = new THREE.Mesh(earthGeo, cloudsMat)
     cloudsMesh.scale.setScalar(1.003)
     earthGroup.add(cloudsMesh)
 
-    const glowMesh = new THREE.Mesh(geometry, getFresnelMat())
+    const glowMesh = new THREE.Mesh(earthGeo, getFresnelMat())
     glowMesh.scale.setScalar(1.01)
     earthGroup.add(glowMesh)
 
     scene.add(earthGroup)
 
-    // Starfield
+    // background stars
     const stars = getStarfield({ numStars: 2000 })
     scene.add(stars)
 
-    // Main satellite (yellow) with halo sprite
+    // main tracked satellite marker (yellow)
     const satGeom = new THREE.SphereGeometry(120, 24, 24)
     const satMat = new THREE.MeshPhongMaterial({
       color: 0xffee00,
@@ -301,16 +318,21 @@ export default function Globe3D({
     const halo = new THREE.Sprite(haloMat)
     halo.scale.set(850, 850, 1)
     sat.add(halo)
+
     scene.add(sat)
 
-    // Group to hold neighbor dots
+    // neighbor satellites container (red dots)
     const neighborGroup = new THREE.Group()
     scene.add(neighborGroup)
 
-    // Raycaster for hover names
+    // INSAT container (orange marker near India)
+    const insatGroup = new THREE.Group()
+    scene.add(insatGroup)
+
+    // hover interaction
     const raycaster = new THREE.Raycaster()
     raycasterRef.current = raycaster
-    hoverablesRef.current = [sat] // we'll push neighbors in later
+    hoverablesRef.current = [sat] // we'll add INSAT + neighbors later
 
     const onPointerMove = e => {
       const rect = renderer.domElement.getBoundingClientRect()
@@ -323,7 +345,7 @@ export default function Globe3D({
 
       if (hits.length > 0) {
         let obj = hits[0].object
-        // climb to parent with userData.name if we hit sprite/child
+        // climb to parent with userData.name
         while (obj && !obj.userData?.name && obj.parent) obj = obj.parent
         const nm = obj?.userData?.name
         if (nm) {
@@ -342,25 +364,63 @@ export default function Globe3D({
 
     renderer.domElement.addEventListener('pointermove', onPointerMove)
 
-    // Save refs for later effects
+    // save refs
     sceneRef.current = scene
     rendererRef.current = renderer
     cameraRef.current = camera
     satRef.current = sat
     neighborGroupRef.current = neighborGroup
+    insatGroupRef.current = insatGroup
 
-    // keep orbit line material resolution correct on resize
+    // INITIAL INSAT DRAW (only if showInsat prop true at mount)
+    if (showInsat) {
+      const EARTH_R_KM = 6371
+      const INSAT_OFFSET_KM = 200 // just above Earth for visibility
+      const insatLatDeg = 5      // a little north of equator so it "sits on India"
+      const insatLonDeg = 83     // ~central India longitude
+
+      const pos = latLonToECEF(
+        insatLatDeg,
+        insatLonDeg,
+        EARTH_R_KM + INSAT_OFFSET_KM
+      )
+
+      const insatMat = new THREE.MeshBasicMaterial({ color: 0xff9900 })
+      const insatGeom = new THREE.SphereGeometry(140, 16, 16)
+      const insatMesh = new THREE.Mesh(insatGeom, insatMat)
+      insatMesh.position.set(pos.x, pos.y, pos.z)
+      insatMesh.userData = { name: 'INSAT (India GEO Slot)' }
+
+      const insatHaloMat = new THREE.SpriteMaterial({
+        map: new THREE.TextureLoader().load('/textures/stars/circle.png'),
+        color: 0xffcc66,
+        transparent: true,
+        opacity: 0.8,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      })
+      const insatHalo = new THREE.Sprite(insatHaloMat)
+      insatHalo.scale.set(700, 700, 1)
+      insatMesh.add(insatHalo)
+
+      insatGroup.add(insatMesh)
+      hoverablesRef.current.push(insatMesh)
+    }
+
+    // resize handling
     const onResize = () => {
       const w = el.clientWidth
       const h = el.clientHeight
       renderer.setSize(w, h)
       camera.aspect = w / h
       camera.updateProjectionMatrix()
-      if (lineMatRef.current) lineMatRef.current.resolution.set(w, h)
+      if (lineMatRef.current) {
+        lineMatRef.current.resolution.set(w, h)
+      }
     }
     window.addEventListener('resize', onResize)
 
-    // Render loop
+    // render loop
     let raf
     const tick = () => {
       controls.update()
@@ -369,7 +429,7 @@ export default function Globe3D({
     }
     tick()
 
-    // Cleanup
+    // cleanup
     return () => {
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', onResize)
@@ -380,7 +440,7 @@ export default function Globe3D({
       renderer.dispose()
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement)
 
-      geometry.dispose()
+      earthGeo.dispose()
       earthMat.dispose()
       lightsMat.dispose()
       cloudsMat.dispose()
@@ -389,19 +449,26 @@ export default function Globe3D({
       satMat.dispose()
       haloMat.map?.dispose?.()
 
+      // cleanup insat children
+      while (insatGroup.children.length) {
+        const obj = insatGroup.children.pop()
+        obj.geometry?.dispose?.()
+        obj.material?.dispose?.()
+      }
+
       if (lineRef.current) {
         lineRef.current.geometry.dispose()
         lineRef.current.material.dispose()
       }
     }
-  }, [mainName])
+  }, [mainName, showInsat])
 
-  // ---------- orbit line update ----------
+  // ---------- orbit line update when orbitPoints change ----------
   useEffect(() => {
     const scene = sceneRef.current
     if (!scene) return
 
-    // remove old orbit line
+    // remove old
     if (lineRef.current) {
       scene.remove(lineRef.current)
       lineRef.current.geometry.dispose()
@@ -418,28 +485,33 @@ export default function Globe3D({
     }
   }, [orbitPoints])
 
-  // ---------- main satellite position update ----------
+  // ---------- update main satellite position ----------
   useEffect(() => {
     if (satPosition && satRef.current) {
       satRef.current.position.set(satPosition.x, satPosition.y, satPosition.z)
     }
   }, [satPosition])
 
-  // ---------- neighbor dots update ----------
+  // ---------- update neighbor dots whenever neighbor list or maxNeighbors changes ----------
   useEffect(() => {
     const ng = neighborGroupRef.current
     if (!ng) return
 
-    // clear any previous neighbors
+    // clear old neighbor meshes
     while (ng.children.length) {
       const c = ng.children.pop()
       c.geometry?.dispose?.()
       c.material?.dispose?.()
     }
 
-    // reset hoverables to just the main sat, we re-add neighbors below
+    // rebuild hoverables list:
+    // keep main sat and any INSAT meshes already in scene
     const hoverables = hoverablesRef.current || []
-    hoverablesRef.current = hoverables.filter(o => o === satRef.current)
+    hoverablesRef.current = hoverables.filter(o => {
+      if (o === satRef.current) return true
+      if (!insatGroupRef.current) return false
+      return insatGroupRef.current.children.includes(o)
+    })
 
     if (!neighbors || !neighbors.length) return
 
@@ -449,10 +521,8 @@ export default function Globe3D({
     for (const n of neighbors.slice(0, cap)) {
       const g = new THREE.SphereGeometry(80, 12, 12)
       const m = new THREE.Mesh(g, mat)
-
       m.position.set(n.x, n.y, n.z)
       m.userData = { name: n.name || 'Neighbor' }
-
       ng.add(m)
       hoverablesRef.current.push(m)
     }
