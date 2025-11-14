@@ -801,7 +801,7 @@ export default function CollisionPredictor(){
       }
 
       neighbors.sort((a,b)=> a.dist - b.dist)
-      const nearest = neighbors.slice(0,20)
+      const nearest = neighbors.slice(1,20)
 
       // Live density factor: faster ramp so it influences risk
       const densityFactor = clamp(0.2 + (liveCountInBand / 80), 0.2, 2.0)
