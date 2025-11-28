@@ -1066,7 +1066,7 @@ export default function CollisionPredictor(){
                 <th>Rel Vel (km/s)</th>
                 <th>TCA (UTC)</th>
                 <th>Risk</th>
-                <th>Action</th>
+                {/* <th>Action</th> */}
               </tr>
             </thead>
             <tbody>
@@ -1077,9 +1077,9 @@ export default function CollisionPredictor(){
                   <td>{p.relVel}</td>
                   <td>{p.tca}</td>
                   <td style={riskColor(p.risk)}>{p.risk}</td>
-                  <td>
+                  {/* <td>
                     <button onClick={()=>openSeriesFor(p)}>View risk vs time</button>
-                  </td>
+                  </td> */}
                 </tr>
               ))}
             </tbody>

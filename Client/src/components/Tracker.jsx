@@ -300,8 +300,7 @@ export default function Tracker({ onTrack, loading }){
       </div>
 
       <div className="small" style={{marginTop:6}}>
-        For real satellites, we fetch live orbit data.
-        Typing "kalpana" shows a demo satellite at fixed coords (no API calls).
+        
       </div>
     </form>
   )
