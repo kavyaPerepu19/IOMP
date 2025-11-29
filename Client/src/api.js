@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_BASE = 'http://localhost:5000'
+const API_BASE = 'https://tle-flask-app.onrender.com'
 
 export async function fetchTLEByName(name){
   const { data } = await axios.get(`${API_BASE}/api/tle`, { params: { name } })
